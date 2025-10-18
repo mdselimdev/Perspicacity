@@ -829,9 +829,8 @@ document.addEventListener('DOMContentLoaded', () => {
             stepsTabContent.innerHTML = renderStepsDisplay(researchStepsList);
         }
     
-        const finalHTML = answerTabContent.innerHTML;
-        addActionButtons(answerTabContent, finalHTML, sources, originalQuery, showAskButton);
-    
+        addActionButtons(answerTabContent, processedText, sources, originalQuery, showAskButton);
+
         currentStreamingDiv = null;
         setSendButtonState(false);
     }
@@ -979,7 +978,7 @@ document.addEventListener('DOMContentLoaded', () => {
         button.remove();
     };
 
-    function addActionButtons(answerTabContent, plainText, sources, originalQuery, showAskButton = false) {
+    function addActionButtons(answerTabContent, markdownText, sources, originalQuery, showAskButton = false) {
         const existingActions = answerTabContent.querySelector('.message-actions');
         if (existingActions) return;
 
@@ -1002,7 +1001,7 @@ document.addEventListener('DOMContentLoaded', () => {
         copyBtn.className = 'action-btn copy-btn';
         copyBtn.title = 'Copy';
         copyBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
-        copyBtn.onclick = () => copyResponse(plainText, sources, originalQuery, copyBtn);
+        copyBtn.onclick = () => copyResponse(markdownText, sources, originalQuery, copyBtn);
 
         const regenBtn = document.createElement('button');
         regenBtn.className = 'action-btn regenerate-btn';
@@ -1015,18 +1014,11 @@ document.addEventListener('DOMContentLoaded', () => {
         answerTabContent.appendChild(actionsDiv);
     }
 
-    function copyResponse(plainText, sources, originalQuery, button) {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = plainText;
+        function copyResponse(markdownText, sources, originalQuery, button) {
+            // Use the passed-in markdownText directly
+            let cleanedMarkdown = markdownText.trim();
 
-        // This will get the text content while preserving the citation numbers
-        let textContent = tempDiv.textContent || tempDiv.innerText;
-
-        // Clean up extra whitespace
-        textContent = textContent.replace(/\s+/g, ' ').trim();
-        textContent = textContent.replace(/\s+([.,!?;:])/g, '$1');
-
-        let copyText = `${originalQuery}\n\n${textContent}\n\n`;
+            let copyText = `${originalQuery}\n\n${cleanedMarkdown}\n\n`;
 
         if (sources && sources.length > 0) {
             copyText += 'Citations:\n';
