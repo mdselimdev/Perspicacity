@@ -7,7 +7,7 @@
 
 Perspicacity is an AI-powered Islamic research assistant that provides sourced answers from trusted Islamic websites (IslamQA.info and IslamWeb.net).
 
-🌐 **Live Demo**: [perspicacity.is-a.dev](https://perspicacity.is-cool.dev)
+🌐 **Live Demo**: [perspicacity.is-cool.dev](https://perspicacity.is-cool.dev)
 
 ## ✨ Features
 
