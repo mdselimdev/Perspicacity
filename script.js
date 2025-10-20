@@ -354,25 +354,33 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     async function handleSearchMode(apiKey, googleApiKey, query, conversationHistory) {
-        const messageDiv = addMessage('', 'assistant', 'search');
+        // Use 'research' as the type to get an empty container for streaming
+        const messageDiv = addMessage('', 'assistant', 'research'); 
         messageDiv.dataset.query = query;
         messageDiv.dataset.mode = 'search';
         currentStreamingDiv = messageDiv;
         abortController = new AbortController();
 
-        const headers = {'Content-Type': 'application/json'};
-        const body = JSON.stringify({
-            api_key: apiKey,
-            google_api_key: googleApiKey,
-            query: query,
-            conversation_history: conversationHistory
-        });
         try {
-            const response = await fetch(`${API_BASE_URL}/search`, { method: 'POST', headers, body, signal: abortController.signal });
-            const result = await response.json();
+            const response = await fetch(`${API_BASE_URL}/search`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream' // Specify we accept a stream
+                },
+                body: JSON.stringify({
+                    api_key: apiKey,
+                    google_api_key: googleApiKey,
+                    query: query,
+                    conversation_history: conversationHistory
+                }),
+                signal: abortController.signal
+            });
 
             if (!response.ok) {
-                const errorMessage = result.message || result.error || 'An unexpected error occurred. Please try again.';
+                // Handle non-streaming errors (like 400, 500 before stream starts)
+                const result = await response.json(); // Try to parse error
+                const errorMessage = result.message || result.error || 'An unexpected error occurred.';
                 await streamResponse(messageDiv, errorMessage, [], query, 'search');
                 currentStreamingDiv = null;
                 setSendButtonState(false);
@@ -380,27 +388,86 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (result.sources) {
-                allSourcesList = result.sources;
-                result.sources.forEach((source, index) => {
-                    sourcesMap[index + 1] = source;
-                });
-            }
-            if (result.articles) {
-                allArticlesList = result.articles;
-            }
-            if (result.books) {
-                allBooksList = result.books;
-            }
+            // --- Begin Stream Handling (like in ResearchMode) ---
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const stepsContainer = document.createElement('div');
+            stepsContainer.className = 'research-steps';
+            messageDiv.querySelector('.message-content').appendChild(stepsContainer);
+            let currentStepDiv = null;
+            let buffer = '';
 
-            await streamResponse(messageDiv, result.answer || result.final_answer, result.sources, query, 'search', result.show_ask_scholar_button);
+            while (true) {
+                if (isStreamingStopped) {
+                     if (abortController) abortController.abort(); // Manually abort if user stopped
+                     break;
+                }
+                
+                const { done, value } = await reader.read();
+                if (done) break;
 
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('event: close')) {
+                        // Server signaled the end of the stream
+                        break; 
+                    }
+                    
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === 'Stream finished.') continue;
+
+                        try {
+                            const result = JSON.parse(data);
+                            
+                            // 1. Handle Status Updates
+                            if (result.status) {
+                                if (currentStepDiv) currentStepDiv.classList.add('completed');
+                                currentStepDiv = addResearchStep(stepsContainer, result.status);
+                                periodicScroll();
+                            
+                            // 2. Handle Final Answer
+                            } else if (result.final_answer) {
+                                stepsContainer.remove(); // Clear all status steps
+                                if (result.sources) {
+                                    allSourcesList = result.sources;
+                                    result.sources.forEach((source, index) => {
+                                        sourcesMap[index + 1] = source;
+                                    });
+                                }
+                                if (result.articles) {
+                                    allArticlesList = result.articles;
+                                }
+                                if (result.books) {
+                                    allBooksList = result.books;
+                                }
+                                await streamResponse(messageDiv, result.final_answer, result.sources, query, 'search', result.show_ask_scholar_button);
+                            
+                            // 3. Handle Errors within the stream
+                            } else if (result.error) { 
+                                stepsContainer.remove();
+                                const errorMessage = result.message || result.error || 'An error occurred during search.';
+                                await streamResponse(messageDiv, errorMessage, [], query, 'search');
+                                currentStreamingDiv = null;
+                                setSendButtonState(false);
+                            }
+                        } catch (e) {
+                            console.error('Error parsing JSON from stream:', e, 'Data:', data);
+                        }
+                    }
+                }
+            }
         } catch (error) {
             if (error.name === 'AbortError') {
+                console.log('Search fetch aborted by user.');
                 const contentDiv = messageDiv.querySelector('.message-content');
-                const searchStatus = contentDiv.querySelector('.search-status');
-                if (searchStatus) searchStatus.remove();
+                const stepsContainer = contentDiv.querySelector('.research-steps');
+                if (stepsContainer) stepsContainer.remove();
             } else {
+                // Handle network-level errors
                 const errorMessage = error.message || 'I encountered an issue processing your request. Please try again.';
                 await streamResponse(messageDiv, errorMessage, [], query, 'search');
             }
@@ -512,9 +579,8 @@ document.addEventListener('DOMContentLoaded', () => {
             messageDiv.dataset.originalQuery = content;
             contentDiv.textContent = content;
             addUserActionButtons(messageDiv, content, modeOrLoadingType || 'search');
-        } else if (modeOrLoadingType === 'search') {
-            contentDiv.innerHTML = '<div class="search-status"><div class="status-spinner"></div><span>Searching Islamic Sources...</span></div>';
-        } else if (modeOrLoadingType === 'research') {
+        } else if (modeOrLoadingType === 'search' || modeOrLoadingType === 'research') {
+            // Both modes now start with an empty container to allow for streaming status
             contentDiv.innerHTML = '';
         } else {
             contentDiv.textContent = content;
@@ -1103,9 +1169,6 @@ document.addEventListener('DOMContentLoaded', () => {
         while (contentDiv.firstChild) {
             contentDiv.removeChild(contentDiv.firstChild);
         }
-        if (newMode === 'search') {
-            contentDiv.innerHTML = '<div class="search-status"><div class="status-spinner"></div><span>Searching Islamic Sources...</span></div>';
-        }
         messageDiv.dataset.mode = newMode;
         sourcesMap = {};
         allSourcesList = [];
@@ -1145,9 +1208,6 @@ document.addEventListener('DOMContentLoaded', () => {
         while (contentDiv.firstChild) {
             contentDiv.removeChild(contentDiv.firstChild);
         }
-        if (workflow === 'search') {
-            contentDiv.innerHTML = '<div class="search-status"><div class="status-spinner"></div><span>Searching Islamic Sources...</span></div>';
-        }
         responseDiv.dataset.query = newQuery;
         responseDiv.dataset.mode = workflow;
         sourcesMap = {};
@@ -1175,20 +1235,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleSearchModeRegenerate(apiKey, googleApiKey, query, messageDiv, conversationHistory) {
         abortController = new AbortController();
+        currentStreamingDiv = messageDiv; // Ensure this is set for streaming
+        isStreamingStopped = false; // Reset stop flag
 
-        const headers = {'Content-Type': 'application/json'};
-        const body = JSON.stringify({
-            api_key: apiKey,
-            google_api_key: googleApiKey,
-            query: query,
-            conversation_history: conversationHistory
-        });
         try {
-            const response = await fetch(`${API_BASE_URL}/search`, { method: 'POST', headers, body, signal: abortController.signal });
-            const result = await response.json();
+            const response = await fetch(`${API_BASE_URL}/search`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream' // Specify we accept a stream
+                },
+                body: JSON.stringify({
+                    api_key: apiKey,
+                    google_api_key: googleApiKey,
+                    query: query,
+                    conversation_history: conversationHistory
+                }),
+                signal: abortController.signal
+            });
 
             if (!response.ok) {
-                const errorMessage = result.message || result.error || 'An unexpected error occurred. Please try again.';
+                const result = await response.json();
+                const errorMessage = result.message || result.error || 'An unexpected error occurred.';
                 await streamResponse(messageDiv, errorMessage, [], query, 'search');
                 currentStreamingDiv = null;
                 setSendButtonState(false);
@@ -1196,26 +1264,84 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (result.sources) {
-                allSourcesList = result.sources;
-                result.sources.forEach((source, index) => {
-                    sourcesMap[index + 1] = source;
-                });
-            }
+            // --- Begin Stream Handling (like in new handleSearchMode) ---
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            const stepsContainer = document.createElement('div');
+            stepsContainer.className = 'research-steps';
+            // Ensure contentDiv is clean before adding steps
+            const contentDiv = messageDiv.querySelector('.message-content');
+            contentDiv.innerHTML = ''; 
+            contentDiv.appendChild(stepsContainer);
+            
+            let currentStepDiv = null;
+            let buffer = '';
 
-            if (result.articles) {
-                allArticlesList = result.articles;
-            }
-            if (result.books) {
-                allBooksList = result.books;
-            }
+            while (true) {
+                if (isStreamingStopped) {
+                     if (abortController) abortController.abort();
+                     break;
+                }
 
-            await streamResponse(messageDiv, result.answer || result.final_answer, result.sources, query, 'search', result.show_ask_scholar_button);
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('event: close')) {
+                        break;
+                    }
+
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === 'Stream finished.') continue;
+
+                        try {
+                            const result = JSON.parse(data);
+
+                            if (result.status) {
+                                if (currentStepDiv) currentStepDiv.classList.add('completed');
+                                currentStepDiv = addResearchStep(stepsContainer, result.status);
+                                periodicScroll();
+
+                            } else if (result.final_answer) {
+                                stepsContainer.remove(); // Clear all status steps
+                                if (result.sources) {
+                                    allSourcesList = result.sources;
+                                    result.sources.forEach((source, index) => {
+                                        sourcesMap[index + 1] = source;
+                                    });
+                                }
+                                if (result.articles) {
+                                    allArticlesList = result.articles;
+                                }
+                                if (result.books) {
+                                    allBooksList = result.books;
+                                }
+                                await streamResponse(messageDiv, result.final_answer, result.sources, query, 'search', result.show_ask_scholar_button);
+
+                            } else if (result.error) {
+                                stepsContainer.remove();
+                                const errorMessage = result.message || result.error || 'An error occurred during search.';
+                                await streamResponse(messageDiv, errorMessage, [], query, 'search');
+                                currentStreamingDiv = null;
+                                setSendButtonState(false);
+                            }
+                        } catch (e) {
+                            console.error('Error parsing JSON from stream:', e, 'Data:', data);
+                        }
+                    }
+                }
+            }
         } catch (error) {
             if (error.name === 'AbortError') {
+                console.log('Search fetch aborted by user.');
                 const contentDiv = messageDiv.querySelector('.message-content');
-                const searchStatus = contentDiv.querySelector('.search-status');
-                if (searchStatus) searchStatus.remove();
+                const stepsContainer = contentDiv.querySelector('.research-steps');
+                if (stepsContainer) stepsContainer.remove();
             } else {
                 const errorMessage = error.message || 'I encountered an issue. Please try again.';
                 await streamResponse(messageDiv, errorMessage, [], query, 'search');
