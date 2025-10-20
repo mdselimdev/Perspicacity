@@ -461,11 +461,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         } catch (error) {
+            const contentDiv = messageDiv.querySelector('.message-content');
+            const stepsContainer = contentDiv.querySelector('.research-steps');
+            if (stepsContainer) stepsContainer.remove();
+
             if (error.name === 'AbortError') {
                 console.log('Search fetch aborted by user.');
-                const contentDiv = messageDiv.querySelector('.message-content');
-                const stepsContainer = contentDiv.querySelector('.research-steps');
-                if (stepsContainer) stepsContainer.remove();
+                // Call streamResponse with a message and the correct mode
+                await streamResponse(messageDiv, "Generation stopped by user.", [], query, 'search');
             } else {
                 // Handle network-level errors
                 const errorMessage = error.message || 'I encountered an issue processing your request. Please try again.';
@@ -483,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
         messageDiv.dataset.query = query;
         messageDiv.dataset.mode = 'research';
         currentStreamingDiv = messageDiv;
+        abortController = new AbortController(); // ADD THIS
 
         try {
             const response = await fetch(`${API_BASE_URL}/research`, {
@@ -495,7 +499,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     api_key: apiKey,
                     google_api_key: googleApiKey,
                     conversation_history: conversationHistory
-                })
+                }),
+                signal: abortController.signal // ADD THIS
             });
 
             const reader = response.body.getReader();
@@ -507,6 +512,10 @@ document.addEventListener('DOMContentLoaded', () => {
             let buffer = '';
 
             while (true) {
+                if (isStreamingStopped) { // ADD THIS BLOCK
+                     if (abortController) abortController.abort();
+                     break;
+                }
                 const { done, value } = await reader.read();
                 if (done) break;
 
@@ -560,7 +569,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const stepsContainer = contentDiv.querySelector('.research-steps');
             if (stepsContainer) stepsContainer.remove();
 
-            const errorMessage = error.message || 'Connection error occurred. Please try again.';
+            let errorMessage;
+            if (error.name === 'AbortError') {
+                console.log('Research fetch aborted by user.');
+                errorMessage = 'Generation stopped by user.';
+            } else {
+                errorMessage = error.message || 'Connection error occurred. Please try again.';
+            }
             await streamResponse(messageDiv, errorMessage, [], query, 'research');
         } finally {
             currentStreamingDiv = null;
