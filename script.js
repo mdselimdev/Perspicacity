@@ -284,6 +284,40 @@ document.addEventListener('DOMContentLoaded', () => {
             eventSource.close();
             eventSource = null;
         }
+    
+        // Handle UI state when stopped during status phase
+        if (currentStreamingDiv) {
+            const contentDiv = currentStreamingDiv.querySelector('.message-content');
+            const stepsContainer = contentDiv.querySelector('.research-steps');
+            if (stepsContainer) {
+                // Get the mode from the message div
+                const mode = currentStreamingDiv.dataset.mode;
+            
+                // Create tabs based on mode
+                const tabsContainer = document.createElement('div');
+                tabsContainer.className = 'response-tabs';
+            
+                let tabsHTML = '';
+                if (mode === 'search') {
+                    tabsHTML = '<button class="response-tab active" data-tab="answer">Answer</button>';
+                } else { // research mode
+                    tabsHTML = '<button class="response-tab active" data-tab="research">Research</button>';
+                }
+                tabsContainer.innerHTML = tabsHTML;
+            
+                // Create the appropriate tab content
+                const tabContent = document.createElement('div');
+                tabContent.className = 'tab-content response-content active';
+                tabContent.dataset.tab = mode === 'research' ? 'research' : 'answer';
+                tabContent.innerHTML = '<p style="color: var(--text-secondary); padding: 1rem;">Generation stopped.</p>';
+            
+                // Replace steps with tabs and content
+                stepsContainer.remove();
+                contentDiv.appendChild(tabsContainer);
+                contentDiv.appendChild(tabContent);
+            }
+        }
+    
         setSendButtonState(false);
         showNotification('Generation stopped', 'error');
     }
@@ -460,17 +494,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             }
-        } catch (error) {
+            } catch (error) {
             if (error.name === 'AbortError') {
                 console.log('Search fetch aborted by user.');
                 const contentDiv = messageDiv.querySelector('.message-content');
                 const stepsContainer = contentDiv.querySelector('.research-steps');
-                if (stepsContainer) stepsContainer.remove();
+                if (stepsContainer) {
+                    // Only remove if tabs haven't been created yet (handled by stopGeneration)
+                    const existingTabs = contentDiv.querySelector('.response-tabs');
+                    if (!existingTabs) {
+                        stepsContainer.remove();
+                    }
+                }
             } else {
                 // Handle network-level errors
                 const errorMessage = error.message || 'I encountered an issue processing your request. Please try again.';
                 await streamResponse(messageDiv, errorMessage, [], query, 'search');
             }
+        }
         } finally {
             currentStreamingDiv = null;
             setSendButtonState(false);
@@ -556,12 +597,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         } catch (error) {
-            const contentDiv = messageDiv.querySelector('.message-content');
-            const stepsContainer = contentDiv.querySelector('.research-steps');
-            if (stepsContainer) stepsContainer.remove();
+            if (error.name === 'AbortError') {
+                console.log('Research fetch aborted by user.');
+                const contentDiv = messageDiv.querySelector('.message-content');
+                const stepsContainer = contentDiv.querySelector('.research-steps');
+                if (stepsContainer) {
+                    // Only remove if tabs haven't been created yet (handled by stopGeneration)
+                    const existingTabs = contentDiv.querySelector('.response-tabs');
+                    if (!existingTabs) {
+                        stepsContainer.remove();
+                    }
+                }
+            } else {
+                const contentDiv = messageDiv.querySelector('.message-content');
+                const stepsContainer = contentDiv.querySelector('.research-steps');
+                if (stepsContainer) stepsContainer.remove();
 
-            const errorMessage = error.message || 'Connection error occurred. Please try again.';
-            await streamResponse(messageDiv, errorMessage, [], query, 'research');
+                const errorMessage = error.message || 'Connection error occurred. Please try again.';
+                await streamResponse(messageDiv, errorMessage, [], query, 'research');
+            }
+        }
         } finally {
             currentStreamingDiv = null;
             setSendButtonState(false);
@@ -1338,14 +1393,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (error) {
             if (error.name === 'AbortError') {
-                console.log('Search fetch aborted by user.');
+                console.log('Search regenerate fetch aborted by user.');
                 const contentDiv = messageDiv.querySelector('.message-content');
                 const stepsContainer = contentDiv.querySelector('.research-steps');
-                if (stepsContainer) stepsContainer.remove();
+                if (stepsContainer) {
+                    const existingTabs = contentDiv.querySelector('.response-tabs');
+                    if (!existingTabs) {
+                        stepsContainer.remove();
+                    }
+                }
             } else {
-                const errorMessage = error.message || 'I encountered an issue. Please try again.';
+                const errorMessage = error.message || 'I encountered an issue processing your request. Please try again.';
                 await streamResponse(messageDiv, errorMessage, [], query, 'search');
             }
+        }
         } finally {
             currentStreamingDiv = null;
             setSendButtonState(false);
@@ -1426,12 +1487,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         } catch (error) {
-            const contentDiv = messageDiv.querySelector('.message-content');
-            const stepsContainer = contentDiv.querySelector('.research-steps');
-            if (stepsContainer) stepsContainer.remove();
+            if (error.name === 'AbortError') {
+                console.log('Research regenerate fetch aborted by user.');
+                const contentDiv = messageDiv.querySelector('.message-content');
+                const stepsContainer = contentDiv.querySelector('.research-steps');
+                if (stepsContainer) {
+                    const existingTabs = contentDiv.querySelector('.response-tabs');
+                    if (!existingTabs) {
+                        stepsContainer.remove();
+                    }
+                }
+            } else {
+                const contentDiv = messageDiv.querySelector('.message-content');
+                const stepsContainer = contentDiv.querySelector('.research-steps');
+                if (stepsContainer) stepsContainer.remove();
 
-            const errorMessage = error.message || 'Connection error occurred. Please try again.';
-            await streamResponse(messageDiv, result.final_answer, result.sources, query, 'research', result.show_ask_scholar_button);
+                const errorMessage = error.message || 'Connection error occurred. Please try again.';
+                await streamResponse(messageDiv, errorMessage, [], query, 'research');
+            }
+        }
         } finally {
             currentStreamingDiv = null;
             setSendButtonState(false);
