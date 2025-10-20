@@ -580,6 +580,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             currentStreamingDiv = null;
             setSendButtonState(false);
+            abortController = null; // ADD THIS LINE
         }
     }
 
@@ -1468,6 +1469,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             currentStreamingDiv = null;
             setSendButtonState(false);
+            abortController = null; // ADD THIS LINE
         }
     }
 
